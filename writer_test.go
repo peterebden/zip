@@ -353,6 +353,57 @@ func TestWriterDirAttributes(t *testing.T) {
 	}
 }
 
+func TestWriterCreateHeaderWithCompressor(t *testing.T) {
+	var buf bytes.Buffer
+	w := NewWriter(&buf)
+
+	r, err := OpenReader("testdata/test.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	rawr, err := os.Open("testdata/test.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rawr.Close()
+	comp := func(w io.Writer) (io.WriteCloser, error) { return nopCloser{w}, nil }
+
+	for _, f := range r.File {
+		offset, err := f.DataOffset()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := rawr.Seek(offset, 0); err != nil {
+			t.Fatal(err)
+		}
+		fw, err := w.CreateHeaderWithCompressor(&f.FileHeader, comp, fixedCRC32(f.CRC32))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.CopyN(fw, rawr, int64(f.CompressedSize64)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	w.Close()
+	r2, err := NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range r2.File {
+		r, err := f.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.CopyN(ioutil.Discard, r, int64(f.UncompressedSize64)); err != nil {
+			t.Fatal(err)
+		}
+		r.Close()
+	}
+}
+
 func testCreate(t *testing.T, w *Writer, wt *WriteTest) {
 	header := &FileHeader{
 		Name:   wt.Name,
@@ -422,4 +473,33 @@ func BenchmarkCompressedZipGarbage(b *testing.B) {
 			runOnce(&buf)
 		}
 	})
+}
+
+// fixedCRC32 implements a Hash32 interface that just writes out a predetermined value.
+// this is really cheating of course but serves our purposes here.
+type fixedCRC32 uint32
+
+func (crc fixedCRC32) Write(p []byte) (n int, err error) {
+	return len(p), nil
+}
+
+func (crc fixedCRC32) Sum(b []byte) []byte {
+	buf := make([]byte, 4)
+	binary.LittleEndian.PutUint32(buf, uint32(crc))
+	return b
+}
+
+func (crc fixedCRC32) Sum32() uint32 {
+	return uint32(crc)
+}
+
+func (crc fixedCRC32) Reset() {
+}
+
+func (crc fixedCRC32) Size() int {
+	return 32
+}
+
+func (crc fixedCRC32) BlockSize() int {
+	return 32
 }
