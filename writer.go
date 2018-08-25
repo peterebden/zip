@@ -257,6 +257,7 @@ func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
 	if comp == nil {
 		return nil, ErrAlgorithm
 	}
+	fh.Flags |= 0x8 // we will write a data descriptor
 	return w.CreateHeaderWithCompressor(fh, comp, crc32.NewIEEE())
 }
 
@@ -356,8 +357,6 @@ func (w *Writer) CreateHeaderWithCompressor(fh *FileHeader, comp Compressor, crc
 
 		ow = dirWriter{}
 	} else {
-		fh.Flags |= 0x8 // we will write a data descriptor
-
 		fw = &fileWriter{
 			zipw:      w.cw,
 			compCount: &countWriter{w: w.cw},
