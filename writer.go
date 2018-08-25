@@ -253,6 +253,18 @@ func detectUTF8(s string) (valid, require bool) {
 // The file's contents must be written to the io.Writer before the next
 // call to Create, CreateHeader, or Close.
 func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
+	comp := w.compressor(fh.Method)
+	if comp == nil {
+		return nil, ErrAlgorithm
+	}
+	return w.CreateHeaderWithCompressor(fh, comp, crc32.NewIEEE())
+}
+
+// CreateHeaderWithCompressor behaves the same as CreateHeader but allows explicitly
+// specifying the compressor to use, which may not necessarily correspond to the
+// Method property of the actual file header. Some care should therefore be taken
+// to ensure the zipfile will be decompressible if calling this directly.
+func (w *Writer) CreateHeaderWithCompressor(fh *FileHeader, comp Compressor, crc hash.Hash32) (io.Writer, error) {
 	if w.last != nil && !w.last.closed {
 		if err := w.last.close(); err != nil {
 			return nil, err
@@ -349,11 +361,7 @@ func (w *Writer) CreateHeader(fh *FileHeader) (io.Writer, error) {
 		fw = &fileWriter{
 			zipw:      w.cw,
 			compCount: &countWriter{w: w.cw},
-			crc32:     crc32.NewIEEE(),
-		}
-		comp := w.compressor(fh.Method)
-		if comp == nil {
-			return nil, ErrAlgorithm
+			crc32:     crc,
 		}
 		var err error
 		fw.comp, err = comp(fw.compCount)
@@ -421,6 +429,18 @@ func (w *Writer) compressor(method uint16) Compressor {
 		comp = compressor(method)
 	}
 	return comp
+}
+
+// WriteRaw writes some data directly to the file, bypassing compression and outside the
+// zipfile's index (although offsets will be updated appropriately).
+func (w *Writer) WriteRaw(b []byte) error {
+	_, err := w.cw.Write(b)
+	return err
+}
+
+// Offset returns the offset that the next file would begin at.
+func (w *Writer) Offset() int {
+	return int(w.cw.count)
 }
 
 type dirWriter struct{}
